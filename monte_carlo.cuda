@@ -1,0 +1,64 @@
+#include <curand.h>
+#include <curand_kernel.h>
+#include <stdio.h>
+#include <time.h>
+
+// kernel for generating one random hit
+#define N 1
+
+__global__ void kernel(int* count_d, int seed){
+        double x,y,z;
+         // find the overall ID of the thread
+        int tid = blockDim.x * blockIdx.x + threadIdx.x;
+        // assume have already set up curand and generated state for each thread...
+        // assume ranges vary by thread index
+        curandState state;
+        curand_init(seed, tid, 0, &state);
+        count_d[tid] = 0;
+//        for(int i = 0; i < N; i++){
+                // get the random x,y points
+                x = curand_uniform(&state);
+                y = curand_uniform(&state);
+                z = ((x*x)+(y*y));
+                if (z<=1)
+                        count_d[tid] += 1;
+//        }
+}
+
+int main (int argc, char* argv[])
+{
+        unsigned long blocks = 10;
+        unsigned long  threads = 100;
+        
+        if(argc > 2) {
+            blocks = atol(argv[1]);
+            threads = atol(argv[2]);
+        }
+        
+        int seed = time(NULL);
+        unsigned long niter = blocks*threads;
+        int *count = (int*) malloc(niter*sizeof(int));
+        int *count_d;
+        cudaMalloc(&count_d, niter*sizeof(int));
+    
+        // launch the kernel
+        kernel<<<blocks, threads>>> (count_d, seed);
+        
+        // kernel calls are non-blocking
+        cudaDeviceSynchronize();
+        
+        // copy the resulting array back
+        cudaMemcpy(count, count_d, niter*sizeof(int), cudaMemcpyDeviceToHost);
+        // reduce array into int
+        
+        int countHit = 0;
+        for(int i = 0; i<niter; i++)
+                countHit += count[i];
+ 
+        // free the cudaMalloc()'d arrays
+        cudaFree(count_d);
+        free(count);
+ 
+        float pi = ((double)countHit/(niter*N))*4.0;
+        printf("Pi: %f\n", pi);
+}
